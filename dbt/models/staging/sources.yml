@@ -1,0 +1,72 @@
+version: 2
+
+# ── Source declarations ───────────────────────────────────────────
+# Defines the raw Snowflake tables loaded by upstream ETL.
+# dbt uses these to generate lineage and run source freshness checks.
+
+sources:
+  - name: product_raw
+    database:  RAW
+    schema:    PRODUCT
+    description: >
+      Raw event and entity data loaded from the product backend
+      via Fivetran / Airbyte into Snowflake.
+
+    freshness:
+      warn_after:  {count: 6,  period: hour}
+      error_after: {count: 24, period: hour}
+    loaded_at_field: _loaded_at
+
+    tables:
+
+      - name: events
+        description: "Append-only stream of all user-generated product events."
+        columns:
+          - name: event_id
+            description: "Globally unique event identifier (UUID)."
+            tests:
+              - unique
+              - not_null
+          - name: user_id
+            tests: [not_null]
+          - name: event_type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['page_view','feature_used','session_start',
+                           'session_end','signup','login','upgrade',
+                           'downgrade','cancellation']
+          - name: occurred_at
+            tests: [not_null]
+
+      - name: users
+        description: "One row per registered user. Updated on change."
+        columns:
+          - name: user_id
+            tests: [unique, not_null]
+          - name: email
+            tests: [unique, not_null]
+          - name: plan_name
+            tests:
+              - accepted_values:
+                  values: ['free','starter','growth','enterprise']
+
+      - name: sessions
+        description: "One row per user session derived from event stream."
+        columns:
+          - name: session_id
+            tests: [unique, not_null]
+          - name: user_id
+            tests: [not_null]
+
+      - name: subscriptions
+        description: "Subscription lifecycle events (created, upgraded, churned)."
+        columns:
+          - name: subscription_id
+            tests: [unique, not_null]
+          - name: user_id
+            tests: [not_null]
+          - name: event_type
+            tests:
+              - accepted_values:
+                  values: ['created','upgraded','downgraded','cancelled','reactivated']

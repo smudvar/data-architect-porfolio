@@ -1,0 +1,117 @@
+version: 2
+
+# ── Mart model documentation & tests ─────────────────────────────
+
+models:
+
+  # ── stg_events ────────────────────────────────────────────────
+  - name: stg_events
+    description: "Cleaned and typed event stream from the product backend."
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: event_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PAGE_VIEW','FEATURE_USED','SESSION_START',
+                       'SESSION_END','SIGNUP','LOGIN','UPGRADE',
+                       'DOWNGRADE','CANCELLATION']
+      - name: occurred_at
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
+
+  # ── stg_users ────────────────────────────────────────────────
+  - name: stg_users
+    description: "Deduplicated, cleaned user dimension."
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+      - name: email
+        tests: [unique, not_null]
+      - name: plan_name
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['free','starter','growth','enterprise']
+      - name: signup_date
+        tests: [not_null]
+
+  # ── stg_sessions ─────────────────────────────────────────────
+  - name: stg_sessions
+    description: "Cleaned session records with capped duration."
+    columns:
+      - name: session_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: session_duration_seconds
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 14400
+
+  # ── mart_user_activity ────────────────────────────────────────
+  - name: mart_user_activity
+    description: >
+      Daily pre-aggregated activity metrics per user.
+      One row per user per day they were active.
+      Powers DAU/WAU/MAU and stickiness dashboards.
+    columns:
+      - name: user_id
+        tests: [not_null]
+      - name: activity_date
+        tests: [not_null]
+      - name: user_id_activity_date
+        tests:
+          - unique:
+              column_name: "user_id || '-' || activity_date"
+      - name: engagement_tier
+        tests:
+          - accepted_values:
+              values: ['power','engaged','casual','passive']
+      - name: total_events
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1        # must have ≥1 event to appear in this table
+
+  # ── mart_dau_wau_mau ──────────────────────────────────────────
+  - name: mart_dau_wau_mau
+    description: >
+      Daily aggregate of DAU, WAU, MAU, stickiness ratios,
+      and feature adoption rates per plan and country.
+    columns:
+      - name: activity_date
+        tests: [not_null]
+      - name: dau
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: dau_mau_stickiness
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1        # ratio must be between 0 and 1
+
+  # ── mart_funnel_analysis ──────────────────────────────────────
+  - name: mart_funnel_analysis
+    description: >
+      One row per user showing their furthest funnel stage reached
+      and time-to-convert metrics within first 30 days.
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+      - name: max_stage_reached
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4]
+      - name: hours_to_activation
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0        # can't activate before signing up
